@@ -56,8 +56,7 @@ Inductive bdecs: Set :=
 
 Inductive trm: Set :=
   | trm_var : avar -> trm
-(*| trm_new : defs -> trm BIND nameless self ref *)
-  | trm_new : defs -> trm
+  | trm_new : defs -> trm -> trm
   | trm_sel : trm -> fld_label -> trm
   | trm_call: trm -> mtd_label -> trm -> trm
 with def: Set :=
@@ -76,13 +75,14 @@ Definition ctx := env typ.
 Definition sto := env defs.
 
 (** *** Syntactic sugar *)
+(*
 Definition trm_fun(T U: typ)(body: trm) := 
              trm_new (defs_cons (def_mtd labels.apply T U body) defs_nil).
 Definition trm_app(func arg: trm) := trm_call func labels.apply arg.
 Definition trm_let(T U: typ)(rhs body: trm) := trm_app (trm_fun T U body) rhs.
 Definition typ_arrow(T1 T2: typ) :=
              typ_bind (decs_cons (dec_mtd labels.apply T1 T2) decs_nil).
-
+*)
 
 (* ###################################################################### *)
 (** ** Definition list membership *)
@@ -185,8 +185,7 @@ with open_rec_decs (k: nat) (u: var) (Ds: decs) { struct Ds }: decs :=
 Fixpoint open_rec_trm (k: nat) (u: var) (t: trm) { struct t }: trm :=
   match t with
   | trm_var a      => trm_var (open_rec_avar k u a)
-(*| trm_new ds     => trm_new (open_rec_defs (S k) u ds) BIND *)
-  | trm_new ds     => trm_new (open_rec_defs    k  u ds)
+  | trm_new ds t0  => trm_new (open_rec_defs k u ds) (open_rec_trm (S k) u t0)
   | trm_sel e n    => trm_sel (open_rec_trm k u e) n
   | trm_call o m a => trm_call (open_rec_trm k u o) m (open_rec_trm k u a)
   end
@@ -256,7 +255,7 @@ Definition fv_bdecs (Ds: bdecs): vars := match Ds with
 Fixpoint fv_trm (t: trm): vars :=
   match t with
   | trm_var x        => (fv_avar x)
-  | trm_new ds       => (fv_defs ds)
+  | trm_new ds t0    => (fv_defs ds) \u (fv_trm t0)
   | trm_sel t l      => (fv_trm t)
   | trm_call t1 m t2 => (fv_trm t1) \u (fv_trm t2)
   end
@@ -295,10 +294,10 @@ Inductive red: trm -> sto -> trm -> sto -> Prop :=
       defs_has              ds  (def_fld l y) ->
       red (trm_sel (trm_var (avar_f x)) l) s
           (trm_var y) s
-  | red_new: forall s ds x,
+  | red_new: forall s ds t x,
       x # s ->
-      red (trm_new ds) s
-          (trm_var (avar_f x)) (s & x ~ ds)
+      red (trm_new ds t) s
+          (open_trm x t) (s & x ~ ds)
   (* congruence rules *)
   | red_call1: forall s o m a s' o',
       red o s o' s' ->
@@ -522,16 +521,12 @@ with ty_trm: ctx -> trm -> typ -> Prop :=
       trm_has G t (dec_mtd m U V) ->
       ty_trm G u U ->
       ty_trm G (trm_call t m u) V
-  | ty_new: forall G ds Ds,
-      (* BIND
-      (forall x, x \notin L ->
-                 ty_defs (G & x ~ typ_bind Ds) (open_defs x ds) (open_decs x Ds)) ->
-      *)
+  | ty_new: forall L G ds t T Ds,
       ty_defs G ds Ds ->
       cbounds_decs Ds ->
-      (* not needed because it follows from ty_defs:
-      wf_decs ip G Ds -> *)
-      ty_trm G (trm_new ds) (typ_bind Ds)
+      (forall x, x \notin L -> ty_trm (G & x ~ typ_bind Ds) (open_trm x t) T) ->
+      wf_typ ip deep G T ->
+      ty_trm G (trm_new ds t) T
   | ty_sbsm: forall G t T U n,
       ty_trm G t T ->
       subtyp ip G T U n ->
@@ -886,7 +881,7 @@ Definition subst_bdecs (z: var) (u: var) (Ds: bdecs) := match Ds with
 Fixpoint subst_trm (z: var) (u: var) (t: trm): trm :=
   match t with
   | trm_var x        => trm_var (subst_avar z u x)
-  | trm_new ds       => trm_new (subst_defs z u ds)
+  | trm_new ds t0    => trm_new (subst_defs z u ds) (subst_trm z u t0)
   | trm_sel t l      => trm_sel (subst_trm z u t) l
   | trm_call t1 m t2 => trm_call (subst_trm z u t1) m (subst_trm z u t2)
   end
@@ -1822,7 +1817,13 @@ Proof.
     - apply* H.
   + (* case ty_sel *) eauto.
   + (* case ty_call *) eauto.
-  + (* case ty_new *) eauto.
+  + (* case ty_new *)
+    intros. subst. apply_fresh ty_new as x; eauto.
+    * rewrite <- concat_assoc.
+      refine (H0 x _ G1 G2 (G3 & x ~ typ_bind Ds) _ _).
+      - auto.
+      - symmetry. apply concat_assoc.
+      - rewrite concat_assoc. auto.
   + (* case ty_sbsm *) eauto.
   + (* case ty_typ *) eauto.
   + (* case ty_fld *) eauto.
@@ -2708,14 +2709,33 @@ Proof.
   + (* case ty_call *)
     intros G t m U V u Has IHt Tyu IHu G1 G2 x Eq Bi Ok. apply* ty_call.
   + (* case ty_new *)
-    intros G ds Ds Tyds IHTyds Cb G1 G2 x Eq Bi Ok. subst G.
-    apply ty_new.
+    intros L G ds t T Ds Tyds IHTyds Cb Fr IFr WfT IWfT G1 G2 x Eq Bi Ok.
+    subst G.
+    apply_fresh ty_new as z.
     - fold subst_defs.
       specialize (IHTyds G1 G2 x).
       specialize (IHTyds eq_refl Bi).
       unfold subst_ctx in IHTyds. unfold subst_ctx.
       apply IHTyds. auto.
     - apply (subst_decs_preserves_cbounds _ _ Cb).
+    - fold subst_trm.
+      assert (zL: z \notin L) by auto.
+      specialize (IFr z zL G1 (G2 & z ~ typ_bind Ds) x).
+      assert (A: subst_ctx x y (G2 & z ~ typ_bind Ds) = subst_ctx x y G2 & (z ~ typ_bind (subst_decs x y Ds))).
+        unfold subst_ctx. rewrite map_push. simpl. reflexivity.
+      rewrite <- concat_assoc. rewrite <- A.
+      assert (B: open_trm z (subst_trm x y t) = subst_trm x y (open_trm z t)).
+        rewrite subst_open_commute_trm. unfold subst_fvar.
+        assert (x <> z) by auto.
+        assert (C: (If x = z then y else z) = z). apply If_r; assumption.
+        rewrite C. reflexivity.
+      rewrite B.
+      apply IFr; eauto.
+      * rewrite <- concat_assoc. reflexivity.
+      * rewrite concat_assoc. apply wf_ctx_push; eauto.
+        apply wf_bind_deep. apply ty_defs_regular with ds; auto.
+    - specialize (IWfT G1 G2 x).
+      apply IWfT; eauto.
 (*+ case ty_new
     intros L G ds Ds Tyds IHTyds Cb G1 G2 x Eq Bi Ok. subst G.
     apply_fresh ty_new as z.
@@ -2953,6 +2973,7 @@ Proof.
                         (subtyp_max_ctx H (Max.le_max_l n n'))).
 Qed.
 
+(*
 Lemma invert_ty_new: forall G ds T2,
   ty_trm G (trm_new ds) T2 ->
   exists n Ds, subtyp ip G (typ_bind Ds) T2 n /\
@@ -2977,6 +2998,7 @@ Proof.
     apply (subtyp_trans (subtyp_max_ctx St (Max.le_max_r n n0))
                         (subtyp_max_ctx H (Max.le_max_l n n0))).
 Qed.
+*)
 
 (*
 Lemma invert_wf_sto_with_weakening: forall s G,
@@ -3757,9 +3779,9 @@ Proof.
         exists (open_trm y t1) s.
         apply (red_call y Bis dsHas).
   + (* case ty_new *)
-    intros G ds Ds Tyds Cb s Wf.
-    left. pick_fresh x.
-    exists (trm_var (avar_f x)) (s & x ~ ds).
+    intros L G ds t T Ds Tyds Cb Is Iwf.
+    left. pick_fresh x. specialize (Is x).
+    exists (open_trm x t) (s & x ~ ds).
     apply* red_new.
   + (* case ty_sbsm *)
     intros. auto_specialize. assumption.
