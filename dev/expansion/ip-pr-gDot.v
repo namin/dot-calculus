@@ -2973,6 +2973,32 @@ Proof.
                         (subtyp_max_ctx H (Max.le_max_l n n'))).
 Qed.
 
+Lemma invert_ty_new: forall G ds t T2,
+  ty_trm G (trm_new ds t) T2 ->
+  exists L n T Ds,
+    subtyp ip G T T2 n /\
+    (forall x, x \notin L -> ty_trm (G & x ~ typ_bind Ds) (open_trm x t) T) /\
+    ty_defs G ds Ds /\
+    cbounds_decs Ds /\
+    wf_decs ip G Ds.
+Proof.
+  introv Ty. gen_eq t0: (trm_new ds t). gen ds.
+  induction Ty; intros ds' Eq; try (solve [ discriminate ]); symmetry in Eq.
+  + (* case ty_new *)
+    inversions Eq. pick_fresh x. exists L. exists 0 T Ds.
+    split. apply subtyp_refl; assumption.
+    split. eauto.
+    split. assumption.
+    split. assumption.
+    lets Wf: (ty_defs_regular H). auto.
+  + (* case ty_sbsm *)
+    subst. rename ds' into ds. specialize (IHTy _ eq_refl).
+    destruct IHTy as [L [n0 [T0 [Ds [St IHTy]]]]]. exists L (max n n0) T0 Ds.
+    refine (conj _ IHTy).
+    apply (subtyp_trans (subtyp_max_ctx St (Max.le_max_r n n0))
+                        (subtyp_max_ctx H (Max.le_max_l n n0))).
+Qed.
+
 (*
 Lemma invert_ty_new: forall G ds T2,
   ty_trm G (trm_new ds) T2 ->
