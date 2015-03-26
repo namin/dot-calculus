@@ -3875,7 +3875,7 @@ Proof.
   + (* red_new *)
     introv Wf Ty.
     apply invert_ty_new in Ty.
-    destruct Ty as [n [Ds1 [StT12 [Tyds [Cb WfDs]]]]].
+    destruct Ty as [L [n [T1 [Ds1 [StT12 [Ty1 [Tyds [Cb WfDs]]]]]]]].
     exists (x ~ (typ_bind Ds1)).
     assert (xG: x # G) by apply* sto_unbound_to_ctx_unbound.
     split.
@@ -3883,9 +3883,9 @@ Proof.
       apply (wf_sto_to_simple_ctx Wf).
     - lets Ok: (wf_sto_to_ok_G Wf). assert (Okx: ok (G & x ~ (typ_bind Ds1))) by auto.
       apply (weaken_subtyp_end Okx) in StT12.
-      refine (ty_sbsm _ StT12). apply ty_var.
-      * apply binds_push_eq.
-      * destruct (subtyp_regular StT12) as [W _]. exact W.
+      refine (ty_sbsm _ StT12).
+      specialize (Ty1 x). apply Ty1.
+      (* x notin L *) admit.
   (*
   + (* red_new *)
     rename T into Ds1. intros G T2 Wf Ty.
