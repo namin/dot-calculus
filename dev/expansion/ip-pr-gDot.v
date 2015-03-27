@@ -2973,6 +2973,49 @@ Proof.
                         (subtyp_max_ctx H (Max.le_max_l n n'))).
 Qed.
 
+Lemma wf_ctx_push_inv : forall m G x T,
+  wf_ctx m (G & x ~ T) -> wf_ctx m G /\ wf_typ m deep G T /\ x # G.
+Proof.
+  intros. inverts H as H1 H2 H3.
+  false (empty_push_inv H1).
+  destructs 3 (eq_push_inv H). subst~.
+Qed.
+
+Lemma wf_ctx_push2 : forall m G x y S,
+  wf_ctx m (G & x ~ S) -> wf_ctx m (G & y ~ S) -> x <> y ->
+  wf_ctx m (G & (y ~ S) & (x ~ S)).
+Proof.
+  introv Hx Hy Neq.
+  apply wf_ctx_push_inv in Hx. inversion Hx as [H [Hwf Frx]].
+  apply wf_ctx_push; auto.
+  + apply weaken_wf_typ_end. apply (wf_ctx_to_ok Hy). assumption.
+Qed.
+
+Lemma ty_new_change_var: forall x y G S t T,
+  wf_ctx ip (G & x ~ S) -> wf_ctx ip (G & y ~ S) ->
+  x \notin fv_trm t -> x \notin fv_typ S -> x \notin fv_typ T ->
+  ty_trm (G & x ~ S) (open_trm x t) T ->
+  ty_trm (G & y ~ S) (open_trm y t) T.
+Proof.
+  introv Okx Oky Frt FrS FrT Ty.
+  destruct (classicT (x = y)) as [Eq | Ne].
+  + subst. assumption.
+  + assert (Okyx: wf_ctx ip (G & y ~ S & x ~ S)). apply wf_ctx_push2; auto.
+    assert (Okyx': ok (G & y ~ S & x ~ S)) by destruct* (wf_ctx_push_inv Okx).
+    assert (Ty': ty_trm (G & y ~ S & x ~ S) (open_trm x t) T)
+      by apply (weaken_ty_trm_middle Okyx' Ty).
+    rewrite* (@subst_intro_trm x y t).
+    destruct (subst_principles y S) as [_ [_ [_ [_ [_ [_ [_ [_ [_ [_ [P _]]]]]]]]]]].
+    specialize (P _ _ _ Ty' (G & y ~ S) empty x).
+    rewrite concat_empty_r in P.
+    assert (Tyy: pth_ty ip (G & y ~ S) (pth_var (avar_f y)) S) by auto.
+    specialize (P eq_refl Tyy Okyx).
+    unfold subst_ctx in P. rewrite map_empty in P. rewrite concat_empty_r in P.
+    rewrite subst_fresh_typ in P.
+    exact P.
+    auto.
+Qed.
+
 Lemma invert_ty_new: forall G ds t T2,
   ty_trm G (trm_new ds t) T2 ->
   exists L n T Ds,
