@@ -3927,8 +3927,13 @@ Proof.
     - lets Ok: (wf_sto_to_ok_G Wf). assert (Okx: ok (G & x ~ (typ_bind Ds1))) by auto.
       apply (weaken_subtyp_end Okx) in StT12.
       refine (ty_sbsm _ StT12).
-      specialize (Ty1 x). apply Ty1.
-      (* x notin L *) admit.
+      assert (Gwf: wf_ctx ip G). apply pr2ip_ctx with (m:=pr). apply wf_sto_to_wf_ctx with (s:=s). assumption.
+      pick_fresh x'. assert (Frx': x' \notin L) by auto.
+      apply ty_new_change_var with (x:=x').
+      apply wf_ctx_push; auto.
+      apply wf_ctx_push; auto.
+      auto. unfold fv_typ. simpl. fold fv_decs. auto. auto.
+      auto.
   (*
   + (* red_new *)
     rename T into Ds1. intros G T2 Wf Ty.
